@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Shopee Review Summarizer",
+  "version": "1.1",
+  "description": "Tóm tắt Top 3 Ưu điểm và Nhược điểm từ bình luận Shopee",
+  "permissions": ["activeTab", "scripting", "tabs", "storage"],
+  "host_permissions": ["https://shopee.vn/*", "http://127.0.0.1:8000/*"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://shopee.vn/*"],
+      "js": ["selector.js", "content.js"]
+    }
+  ],
+  "icons": {
+    "16": "./image/favicon-16x16.png",
+    "32": "./image/favicon-32x32.png"
+  }
+}

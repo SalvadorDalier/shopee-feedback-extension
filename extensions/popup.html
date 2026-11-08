@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="../assest/input.css" />
+    <link rel="stylesheet" href="output.css" />
+    <title>extension-frontend</title>
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+  </head>
+  <body class="bg-slate-50 p-4 text-slate-800" style="width: 360px; min-width: 360px;">
+    <div class="space-y-4">
+      <!-- Header -->
+      <div class="flex items-center justify-center gap-1.5 border-b border-slate-200 pb-2">
+        <h1 class="text-center text-sm font-bold text-slate-900">
+          Shopee Review Summarizer
+        </h1>
+      </div>
+
+      <!-- Nút kích hoạt -->
+      <button
+        id="btn-extract"
+        class="w-full py-2.5 px-4 bg-orange-600 hover:bg-orange-500 active:bg-orange-700 text-white font-medium text-sm rounded-lg shadow transition flex items-center justify-center gap-2 cursor-pointer"
+      >
+        <span>Phân Tích</span>
+      </button>
+
+      <!-- Trạng thái -->
+      <div
+        id="status-msg"
+        class="text-xs text-center text-slate-500 hidden"
+      ></div>
+
+      <!-- Kết quả tóm tắt -->
+      <div id="result-box" class="space-y-3 hidden">
+        <!-- Top 3 Tốt -->
+        <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+          <h2 class="text-xs font-bold text-emerald-800 flex items-center gap-1.5 mb-1.5">
+            <span class="inline-block px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-900 text-[10px] font-semibold">Ưu điểm</span>
+            <span>Top 3 Điểm Tốt</span>
+          </h2>
+          <ul
+            id="pos-list"
+            class="space-y-1.5 text-xs text-emerald-950 list-disc list-inside leading-relaxed"
+          ></ul>
+        </div>
+
+        <!-- Top 3 Tệ -->
+        <div class="bg-rose-50 border border-rose-200 rounded-lg p-3">
+          <h2 class="text-xs font-bold text-rose-800 flex items-center gap-1.5 mb-1.5">
+            <span class="inline-block px-1.5 py-0.5 rounded bg-rose-200 text-rose-900 text-[10px] font-semibold">Nhược điểm</span>
+            <span>Top 3 Điểm Cần Chú Ý</span>
+          </h2>
+          <ul
+            id="neg-list"
+            class="space-y-1.5 text-xs text-rose-950 list-disc list-inside leading-relaxed"
+          ></ul>
+        </div>
+      </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
