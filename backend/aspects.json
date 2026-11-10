@@ -119,7 +119,15 @@
       "chất kem",
       "bàn phím",
       "bánh",
-      "chất liệu"
+      "chất liệu",
+      "dây",
+      "dây tai nghe",
+      "mic",
+      "microphone",
+      "đàm thoại",
+      "housing",
+      "cách âm",
+      "tai"
     ],
     "giá cả": [
       "giá",
@@ -648,6 +656,25 @@
     "khong hai long",
     "kém chất lượng",
     "kem chat luong",
-    "hàng lậu"
+    "hàng lậu",
+    "mỏng manh",
+    "dễ rối",
+    "rè",
+    "hơi rè",
+    "rè rè",
+    "chói",
+    "bị chói",
+    "chói tai",
+    "cấn tai",
+    "đau tai",
+    "housing to",
+    "housing hơi to",
+    "hơi to",
+    "chật",
+    "hơi chật",
+    "rộng",
+    "không ấm",
+    "dễ đứt",
+    "dễ gãy"
   ]
 }

@@ -1,145 +1,140 @@
-// ============================================================
-// POPUP CONTROLLER – ĐIỀU PHỐI GIAO DIỆN & DỮ LIỆU
-// ============================================================
+// popup.js
+// gọi content script lấy review -> merge text -> gửi backend -> hiển thị kết quả
 
-/** Truy vấn DOM element theo selector, báo lỗi nếu không tìm thấy */
-function $(selector) {
-  const el = document.querySelector(selector);
-  if (!el) throw new Error(`Không tìm thấy phần tử: ${selector}`);
-  return el;
+const analyzeBtn = document.getElementById("analyzeBtn");
+const statusText = document.getElementById("statusText");
+const positiveList = document.getElementById("positiveList");
+const negativeList = document.getElementById("negativeList");
+
+function setStatus(message) {
+  if (statusText) statusText.textContent = message;
 }
 
-/** Cập nhật thông báo trạng thái lên giao diện */
-function showStatus(el, text, isError = false) {
-  el.classList.remove(CONFIG.css.hidden, CONFIG.css.error);
-  if (isError) el.classList.add(CONFIG.css.error);
-  el.innerText = text;
+function clearResults() {
+  positiveList.innerHTML = "";
+  negativeList.innerHTML = "";
 }
 
-/** Render danh sách <li> vào <ul> an toàn */
-function renderList(ulElement, items, textKey) {
-  ulElement.innerHTML = "";
-  (items || []).forEach((item) => {
+function renderResults(result) {
+  clearResults();
+
+  (result.top_positive || []).forEach((item) => {
     const li = document.createElement("li");
-    li.textContent = typeof item === "string" ? item : (item?.[textKey] ?? "");
-    ulElement.appendChild(li);
+    li.textContent = `${item.aspect}: "${item.example}"`;
+    positiveList.appendChild(li);
   });
+
+  (result.top_negative || []).forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = `${item.aspect}: "${item.example}"`;
+    negativeList.appendChild(li);
+  });
+
+  if (!result.top_positive?.length && !result.top_negative?.length) {
+    setStatus("Không đủ dữ liệu để phân tích ưu/nhược điểm.");
+  } else {
+    setStatus("Hoàn tất.");
+  }
 }
 
-/** Lấy thông tin tab đang hoạt động */
-async function getActiveTab() {
-  const [tab] = await chrome.tabs.query({
-    active: true,
-    currentWindow: true,
-  });
+// Gộp review (structured + freeText) từ content.js thành 1 chuỗi text duy nhất
+// vì backend chỉ cần list[str] để phân tích, không cần giữ cấu trúc
+function mergeReviewToText(review) {
+  const structuredText = Object.entries(review.structured || {})
+    .map(([label, value]) => `${label}: ${value}`)
+    .join(". ");
+  const parts = [structuredText, review.freeText].filter((s) => s && s.trim());
+  return parts.join(". ").trim();
+}
+
+async function getActiveShopeeTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.url || !tab.url.includes("shopee.vn")) {
+    return null;
+  }
   return tab;
 }
 
-/** Tải dữ liệu review mẫu từ tệp json dự phòng (không hardcode trong code) */
+async function extractReviewsFromContentScript(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(
+      tabId,
+      { type: "EXTRACT_SHOPEE_REVIEWS" },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, reason: "NO_CONTENT_SCRIPT", reviews: [] });
+          return;
+        }
+        resolve(
+          response || { ok: false, reason: "EMPTY_RESPONSE", reviews: [] },
+        );
+      },
+    );
+  });
+}
+
+// Dự phòng: dùng mock_reviews.json nếu cào thật thất bại (đúng như README mô tả)
 async function loadMockReviews() {
-  try {
-    const fileUrl = chrome.runtime.getURL(CONFIG.mockDataPath);
-    const res = await fetch(fileUrl);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.warn("Không thể tải file mock reviews:", err);
-    return [];
-  }
+  const url = chrome.runtime.getURL("mock_reviews.json");
+  const res = await fetch(url);
+  const data = await res.json();
+  // Giả định mock_reviews.json có cùng shape { reviews: [...] } hoặc là mảng trực tiếp
+  return Array.isArray(data) ? data : data.reviews || [];
 }
 
-/** Gửi message yêu cầu content script cào review */
-async function fetchReviewsFromContentScript(tabId) {
-  try {
-    const response = await chrome.tabs.sendMessage(tabId, {
-      action: CONFIG.actions.extractReviews,
-    });
-    if (response?.success && Array.isArray(response.reviews) && response.reviews.length > 0) {
-      return response.reviews;
-    }
-  } catch (e) {
-    console.warn(CONFIG.messages.domWarning, e);
+async function callBackendAnalyze(texts) {
+  const baseUrl =
+    (typeof CONFIG !== "undefined" && CONFIG.API_BASE_URL) ||
+    "http://127.0.0.1:8000";
+  const res = await fetch(`${baseUrl}/api/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reviews: texts }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Backend trả lỗi: ${res.status}`);
   }
-  return [];
+  return res.json();
 }
 
-/** Lấy URL API backend (ưu tiên lấy từ chrome.storage nếu người dùng cấu hình tùy chỉnh) */
-async function getBackendAnalyzeUrl() {
-  if (chrome.storage?.sync) {
-    try {
-      const data = await chrome.storage.sync.get("customBackendUrl");
-      if (data?.customBackendUrl) return data.customBackendUrl;
-    } catch (_) {}
-  }
-  return CONFIG.backend.analyzeUrl;
-}
-
-/** Gửi danh sách review sang Backend FastAPI để phân tích ABSA */
-async function analyzeReviews(productUrl, reviews) {
-  const endpoint = await getBackendAnalyzeUrl();
-  try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        product_url: productUrl,
-        reviews,
-      }),
-    });
-    if (!res.ok) throw new Error(CONFIG.messages.backendError(res.status));
-    return await res.json();
-  } catch (err) {
-    if (err.message.includes("Failed to fetch") || err.name === "TypeError") {
-      throw new Error(CONFIG.messages.serverOffline(endpoint));
-    }
-    throw err;
-  }
-}
-
-// ============================================================
-// XỬ LÝ SỰ KIỆN NÚT PHÂN TÍCH
-// ============================================================
-
-$(CONFIG.selectors.btnExtract).addEventListener("click", async () => {
-  const statusMsg = $(CONFIG.selectors.statusMsg);
-  const resultBox = $(CONFIG.selectors.resultBox);
-  const posList = $(CONFIG.selectors.posList);
-  const negList = $(CONFIG.selectors.negList);
-
-  showStatus(statusMsg, CONFIG.messages.extracting);
+async function handleAnalyzeClick() {
+  analyzeBtn.disabled = true;
+  clearResults();
+  setStatus("Đang lấy đánh giá...");
 
   try {
-    const tab = await getActiveTab();
-    if (!tab?.id) {
-      throw new Error(CONFIG.messages.invalidTab);
-    }
+    const tab = await getActiveShopeeTab();
+    let reviews = [];
 
-    // 1. Cào review trực tiếp từ trang Shopee hiện tại
-    let reviews = await fetchReviewsFromContentScript(tab.id);
-
-    // 2. Nếu Shopee chặn hoặc chưa tải được review, nạp dữ liệu lưu sẵn từ file JSON
-    if (reviews.length === 0) {
-      showStatus(statusMsg, CONFIG.messages.fallback);
-      reviews = await loadMockReviews();
-      if (reviews.length === 0) {
-        throw new Error(CONFIG.messages.emptyData);
+    if (tab) {
+      const extraction = await extractReviewsFromContentScript(tab.id);
+      if (extraction.ok && extraction.reviews?.length > 0) {
+        reviews = extraction.reviews;
       }
-    } else {
-      showStatus(statusMsg, CONFIG.messages.collected(reviews.length));
     }
 
-    // 3. Gửi sang backend phân tích
-    const productUrl = tab.url || "";
-    const data = await analyzeReviews(productUrl, reviews);
+    if (reviews.length === 0) {
+      setStatus("Không lấy được review thật, dùng dữ liệu mẫu...");
+      reviews = await loadMockReviews();
+    }
 
-    // 4. Render kết quả lên giao diện Popup
-    const { responseKeys } = CONFIG;
-    renderList(posList, data[responseKeys.positive], responseKeys.itemText);
-    renderList(negList, data[responseKeys.negative], responseKeys.itemText);
+    const texts = reviews.map(mergeReviewToText).filter((t) => t.length > 0);
 
-    resultBox.classList.remove(CONFIG.css.hidden);
-    showStatus(statusMsg, CONFIG.messages.done(data[responseKeys.total] ?? reviews.length));
+    if (texts.length === 0) {
+      setStatus("Không có nội dung review để phân tích.");
+      return;
+    }
+
+    setStatus(`Đang phân tích ${texts.length} đánh giá...`);
+    const result = await callBackendAnalyze(texts);
+    renderResults(result);
   } catch (err) {
-    showStatus(statusMsg, CONFIG.messages.errorPrefix + err.message, true);
+    setStatus("Lỗi: không kết nối được backend. Kiểm tra server đã chạy chưa.");
+    console.error(err);
+  } finally {
+    analyzeBtn.disabled = false;
   }
-});
+}
+
+analyzeBtn.addEventListener("click", handleAnalyzeClick);

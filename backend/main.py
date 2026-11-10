@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List
 from analyze_review import analyze_reviews as run_absa   # <-- THÊM DÒNG NÀY
 # 1. Khởi tạo ứng dụng FastAPI
-app = FastAPI(title="Shopee Review Summarizer API")
+app = FastAPI(title="Shopee Review API")
 
 # 2. Cấu hình CORS để Chrome Extension có thể gọi được API
 app.add_middleware(

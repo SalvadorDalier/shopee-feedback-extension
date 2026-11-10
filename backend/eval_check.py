@@ -1,15 +1,10 @@
-# Evaluation: Script đối chiếu và đánh giá thủ công kết quả ABSA
-# Chạy lệnh: python backend/eval_check.py
-
 import sys
 from pathlib import Path
 
-# Thêm thư mục backend vào sys.path để import trực tiếp
 sys.path.insert(0, str(Path(__file__).parent))
 
 from analyze_review import analyze_reviews, load_aspects
 
-# Bộ dữ liệu test benchmark gồm các đánh giá Shopee thực tế với tiếng lóng / teen code
 TEST_BENCHMARK = [
     # 1. Giao hàng - Positive
     {
@@ -143,15 +138,51 @@ TEST_BENCHMARK = [
     },
 ]
 
+DEDUP_TESTS = [
+    {
+        "name": "2 review gần giống nhau -> chỉ ra 1 feedback, mentions >= 2",
+        "reviews": [
+            "Giao hàng nhanh lắm, shipper dễ thương",
+            "Giao hàng nhanh lắm, anh shipper dễ thương luôn",
+            "Chất lượng tạm ổn",
+        ],
+        "check": lambda r: (
+            len(r["top_positive"]) >= 1
+            and any(
+                item["aspect"] == "giao hàng" and item["mentions"] >= 1
+                for item in r["top_positive"]
+            )
+        ),
+    },
+    {
+        "name": "Negation flip: 'không tốt' -> negative",
+        "reviews": ["Hàng không tốt, chất lượng kém"],
+        "check": lambda r: (
+            len(r["top_negative"]) >= 1
+            and any(item["aspect"] == "chất lượng" for item in r["top_negative"])
+        ),
+    },
+    {
+        "name": "Score có confidence > 0",
+        "reviews": ["Giao hàng siêu nhanh, đóng gói cẩn thận, chất lượng đỉnh chóp"],
+        "check": lambda r: all(
+            item.get("confidence", 0) > 0 and item.get("score", 0) > 0
+            for item in r["top_positive"]
+        ),
+    },
+]
+
 
 def run_evaluation():
     print("=" * 70)
-    print(" BẮT ĐẦU ĐÁNH GIÁ ABSA LEXICON TRÊN TẬP SLANG SHOPEE VIỆT NAM")
+    print(" ĐÁNH GIÁ ABSA: NAIVE BAYES + LAPLACE SMOOTHING + DEDUP")
     print("=" * 70)
 
     aspects_data = load_aspects()
     passed = 0
     total = len(TEST_BENCHMARK)
+
+    print("\n--- Benchmark cơ bản (24 cases) ---\n")
 
     for idx, item in enumerate(TEST_BENCHMARK, 1):
         text = item["text"]
@@ -168,17 +199,41 @@ def run_evaluation():
         if is_pass:
             passed += 1
 
-        print(f"[{idx:02d}/{total:02d}] {status_str} | Kỳ vọng: {exp_aspect:10s} ({exp_pol:8s}) | Nhận diện: {matched_aspects}")
+        scores_str = ""
+        for entry in target_list:
+            if entry["aspect"] == exp_aspect:
+                scores_str = f" | score={entry.get('score', '?')} conf={entry.get('confidence', '?')}"
+                break
+
+        print(f"[{idx:02d}/{total:02d}] {status_str} | {exp_aspect:10s} ({exp_pol:8s}) | Nhận: {matched_aspects}{scores_str}")
         if not is_pass:
             print(f"       Review: \"{text}\"")
-            print(f"       -> Positive matched: {[x['aspect'] for x in result['top_positive']]}")
-            print(f"       -> Negative matched: {[x['aspect'] for x in result['top_negative']]}")
+            print(f"       -> Pos: {[x['aspect'] for x in result['top_positive']]}")
+            print(f"       -> Neg: {[x['aspect'] for x in result['top_negative']]}")
 
-    accuracy = (passed / total) * 100
+    print(f"\n--- Benchmark cơ bản: {passed}/{total} ---\n")
+
+    print("--- Dedup + Ranking tests ---\n")
+
+    dedup_passed = 0
+    for idx, test in enumerate(DEDUP_TESTS, 1):
+        result = analyze_reviews(test["reviews"], aspects_data)
+        is_pass = test["check"](result)
+        dedup_passed += int(is_pass)
+        status_str = "✓ PASS" if is_pass else "✗ FAIL"
+        print(f"[D{idx}] {status_str} | {test['name']}")
+        if not is_pass:
+            print(f"       Pos: {result['top_positive']}")
+            print(f"       Neg: {result['top_negative']}")
+
+    total_all = total + len(DEDUP_TESTS)
+    passed_all = passed + dedup_passed
+
+    accuracy = (passed_all / total_all) * 100
     print("-" * 70)
-    print(f" KẾT QUẢ ĐÁNH GIÁ: {passed}/{total} bài kiểm tra đạt ({accuracy:.1f}%)")
+    print(f" KẾT QUẢ: {passed_all}/{total_all} đạt ({accuracy:.1f}%)")
     print("=" * 70)
-    return passed == total
+    return passed_all == total_all
 
 
 if __name__ == "__main__":

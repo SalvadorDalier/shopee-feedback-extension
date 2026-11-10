@@ -1,264 +1,161 @@
-// ============================================================
-// CẤU HÌNH – content script dùng SEL & PATTERNS từ selector.js
-// ============================================================
-const CONTENT_CONFIG = Object.freeze({
-  // Số review tối đa mỗi lần thu thập
-  maxReviews: 30,
+const MAX_PAGES = 50;
+const PAGE_DELAY_MS = 1200;
+const RENDER_WAIT_MS = 800;
 
-  // Độ dài tối thiểu của văn bản review để không bị lọc
-  minTextLength: 5,
-
-  // Thời gian chờ (ms)
-  delays: {
-    scrollWait: 1200, // chờ sau khi cuộn tới vùng đánh giá
-    pageWait: 2000, // chờ sau khi lật trang
-  },
-
-  // Số trang tối đa sẽ lật tự động
-  maxPages: 5,
-
-  // Action name phải khớp với popup.js CONFIG.actions.extractReviews
-  action: "EXTRACT_SHOPEE_REVIEWS",
-});
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-/** Tạm dừng n ms */
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Đếm số sao của 1 review item.
- * Đếm số thẻ svg.icon-rating-solid bên trong div.rGdC5O (vùng sao riêng của item,
- * không lẫn với sao tổng quan ở đầu trang).
- */
-function countStars(itemNode) {
-  const starContainer = itemNode.querySelector(".rGdC5O");
-  if (!starContainer) return 0;
-  return starContainer.querySelectorAll(SEL.star).length;
+function queryAll(root, selector) {
+  return Array.from(root.querySelectorAll(selector));
 }
 
-/**
- * Phân tích chuỗi dateLine: "2026-09-13 23:15 | Variation: GK Kuten Jack 3.5,Không Mic"
- * Trả về { date, variation }
- */
-function parseDateLine(itemNode) {
-  const el = itemNode.querySelector(SEL.dateLine);
-  if (!el) return { date: "", variation: "" };
+function waitForSelector(selector, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const existing = document.querySelector(selector);
+    if (existing) return resolve(existing);
 
-  const raw = el.innerText.trim();
-  const parts = raw.split(PATTERNS.dateLineSeparator);
-
-  const datePart = (parts[0] || "").trim();
-  const dateMatch = datePart.match(PATTERNS.date);
-  const date = dateMatch ? dateMatch[0] : datePart;
-
-  let variation = "";
-  if (parts.length > 1) {
-    variation = parts
-      .slice(1)
-      .join(PATTERNS.dateLineSeparator)
-      .trim()
-      .replace(PATTERNS.variationPrefix, "");
-  }
-
-  return { date, variation };
-}
-
-/**
- * Trích xuất các nhãn đánh giá có cấu trúc (VD: "Âm thanh: hợp gu", "Thiết kế: đeo êm").
- * Mỗi span.K5v3lN chứa nhãn, giá trị nằm ở nextElementSibling.
- */
-function extractStructuredLabels(itemNode) {
-  const block = itemNode.querySelector(SEL.structured);
-  if (!block) return [];
-
-  const labels = block.querySelectorAll(SEL.label);
-  const result = [];
-
-  labels.forEach((labelEl) => {
-    const labelText = labelEl.innerText.trim().replace(PATTERNS.labelTail, "");
-    const valueEl = labelEl.nextElementSibling;
-    const valueText = valueEl ? valueEl.innerText.trim() : "";
-    if (labelText && valueText) {
-      result.push({ label: labelText, value: valueText });
-    }
-  });
-
-  return result;
-}
-
-/**
- * Trích xuất văn bản tự do (bình luận chính của người dùng).
- */
-function extractFreeText(itemNode) {
-  const el = itemNode.querySelector(SEL.freeText);
-  return el ? el.innerText.trim() : "";
-}
-
-// ============================================================
-// TRÍCH XUẤT CHÍNH
-// ============================================================
-
-/**
- * Trích xuất tất cả review từ trang hiện tại.
- * Trả về mảng các đối tượng có cấu trúc:
- * {
- *   cmtid:      string,   – ID bình luận từ data-cmtid
- *   stars:      number,   – Số sao (1–5)
- *   date:       string,   – Ngày đánh giá (YYYY-MM-DD)
- *   variation:  string,   – Phân loại hàng đã mua
- *   structured: [{label, value}],  – Đánh giá có nhãn
- *   freeText:   string,   – Bình luận tự do
- *   fullText:   string,   – Gộp structured + freeText làm 1 chuỗi (để gửi backend)
- * }
- */
-function extractReviewsFromDOM() {
-  const items = document.querySelectorAll(SEL.item);
-  const results = [];
-
-  items.forEach((node) => {
-    const cmtid = node.dataset.cmtid || "";
-    const stars = countStars(node);
-    const { date, variation } = parseDateLine(node);
-    const structured = extractStructuredLabels(node);
-    const freeText = extractFreeText(node);
-
-    // Gộp structured labels + freeText thành 1 chuỗi hoàn chỉnh
-    const structuredText = structured
-      .map((s) => `${s.label}: ${s.value}`)
-      .join(". ");
-    const fullText = [structuredText, freeText].filter(Boolean).join(". ");
-
-    // Lọc bỏ review không có nội dung có ý nghĩa
-    if (fullText.length <= CONTENT_CONFIG.minTextLength) return;
-
-    results.push({
-      cmtid,
-      stars,
-      date,
-      variation,
-      structured,
-      freeText,
-      fullText,
+    const observer = new MutationObserver(() => {
+      const el = document.querySelector(selector);
+      if (el) {
+        observer.disconnect();
+        resolve(el);
+      }
     });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    setTimeout(() => {
+      observer.disconnect();
+      resolve(document.querySelector(selector));
+    }, timeoutMs);
   });
-
-  return results;
 }
 
-/**
- * Kiểm tra xem nút "Next" có thể bấm được không.
- */
-function canGoNext() {
-  const btn = document.querySelector(`button${SEL.pageNext}`);
-  return btn && !btn.disabled;
-}
+function extractOneReview(itemEl) {
+  const cmtid = itemEl.dataset.cmtid || null;
 
-/**
- * Bấm nút "Next" và chờ trang mới tải xong.
- */
-async function goNextPage() {
-  const btn = document.querySelector(`button${SEL.pageNext}`);
-  if (!btn || btn.disabled) return false;
-  btn.click();
-  await sleep(CONTENT_CONFIG.delays.pageWait);
-  return true;
-}
+  const stars = queryAll(itemEl, SELECTORS.star).length;
 
-/**
- * Lấy trang đang active (số).
- */
-function getCurrentPage() {
-  const active = document.querySelector(SEL.pageActive);
-  return active ? parseInt(active.innerText, 10) || 1 : 1;
-}
-
-// ============================================================
-// THU THẬP ĐA TRANG
-// ============================================================
-
-/**
- * Tự động gom review từ nhiều trang cho đến khi đủ maxCount hoặc hết trang.
- * Sử dụng cmtid để khử trùng lặp giữa các trang.
- */
-async function collectReviews(maxCount = CONTENT_CONFIG.maxReviews) {
-  // Kiểm tra bố cục Shopee có đúng cấu trúc đã khảo sát không
-  const layout = checkLayout();
-  if (!layout.ok) {
-    console.warn(
-      "[Shopee Summarizer] Layout check failed (E02):",
-      layout,
-      "— thử thu thập dù sao",
-    );
-  }
-
-  // Cuộn nhẹ tới vùng đánh giá để kích hoạt render
-  const ratingSection =
-    document.querySelector(SEL.listWrap) || document.querySelector(SEL.list);
-  if (ratingSection) {
-    ratingSection.scrollIntoView({ behavior: "smooth", block: "center" });
-    await sleep(CONTENT_CONFIG.delays.scrollWait);
-  }
-
-  const seenIds = new Set();
-  const collected = [];
-  let pagesVisited = 0;
-
-  while (
-    collected.length < maxCount &&
-    pagesVisited < CONTENT_CONFIG.maxPages
-  ) {
-    const pageReviews = extractReviewsFromDOM();
-
-    for (const review of pageReviews) {
-      if (seenIds.has(review.cmtid)) continue;
-      seenIds.add(review.cmtid);
-      collected.push(review);
-      if (collected.length >= maxCount) break;
+  const dateLineEl = itemEl.querySelector(SELECTORS.dateLine);
+  let date = null;
+  let variation = null;
+  if (dateLineEl) {
+    const raw = dateLineEl.textContent.trim();
+    const parts = raw.split("|").map((s) => s.trim());
+    date = parts[0] || null;
+    if (parts[1]) {
+      variation = parts[1].replace(/^Variation:\s*/i, "");
     }
-
-    pagesVisited++;
-
-    // Dừng nếu đã đủ hoặc không thể lật trang tiếp
-    if (collected.length >= maxCount || !canGoNext()) break;
-
-    const prevPage = getCurrentPage();
-    const navigated = await goNextPage();
-    if (!navigated || getCurrentPage() === prevPage) break;
   }
 
-  return collected;
+  const structuredEl = itemEl.querySelector(SELECTORS.structured);
+  const structured = {};
+  if (structuredEl) {
+    const labelEls = queryAll(structuredEl, SELECTORS.label);
+    labelEls.forEach((labelEl) => {
+      const key = labelEl.textContent.trim();
+      const valueEl = labelEl.nextElementSibling;
+      if (key && valueEl) {
+        structured[key] = valueEl.textContent.trim();
+      }
+    });
+  }
+
+  const freeTextEl = itemEl.querySelector(SELECTORS.freeText);
+  const freeText = freeTextEl ? freeTextEl.textContent.trim() : "";
+
+  return {
+    cmtid,
+    stars,
+    date,
+    variation,
+    structured,
+    freeText,
+  };
 }
 
-// ============================================================
-// LẮNG NGHE MESSAGE TỪ popup.js
-// ============================================================
+function extractCurrentPageReviews() {
+  const listEl = document.querySelector(SELECTORS.list);
+  if (!listEl) return [];
 
-chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (request.action !== CONTENT_CONFIG.action) return false;
+  const items = queryAll(listEl, SELECTORS.item);
+  return items.map(extractOneReview).filter((r) => r.cmtid !== null);
+}
 
-  collectReviews()
-    .then((reviews) => {
-      // Gửi cả dữ liệu có cấu trúc và mảng text thuần cho backend
-      sendResponse({
-        success: true,
-        reviews: reviews.map((r) => r.fullText), // text[] cho backward compat
-        structured: reviews, // dữ liệu đầy đủ
-        page: getCurrentPage(),
-        total: reviews.length,
-      });
-    })
-    .catch((err) => {
-      sendResponse({
-        success: false,
-        error: err.message,
-        reviews: [],
-      });
+function getNextPageButton() {
+  const pagerEl = document.querySelector(SELECTORS.pager);
+  if (!pagerEl) return null;
+
+  const btn = pagerEl.querySelector(SELECTORS.pageNext);
+  if (!btn) return null;
+
+  const isDisabled =
+    btn.getAttribute("disabled") !== null ||
+    btn.classList.contains("shopee-icon-button--disabled") ||
+    btn.getAttribute("aria-disabled") === "true";
+
+  return isDisabled ? null : btn;
+}
+
+async function crawlShopeeReviews() {
+  const listWrapEl = await waitForSelector(SELECTORS.listWrap, 5000);
+  if (!listWrapEl) {
+    return { ok: false, reason: "NO_RATINGS_SECTION", reviews: [] };
+  }
+
+  listWrapEl.scrollIntoView({ behavior: "smooth", block: "center" });
+  await delay(RENDER_WAIT_MS);
+
+  const allReviews = [];
+  const seenCmtids = new Set();
+  let emptyStreak = 0;
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    await waitForSelector(SELECTORS.item, 3000);
+    await delay(300);
+
+    const pageReviews = extractCurrentPageReviews();
+
+    let newCount = 0;
+    pageReviews.forEach((r) => {
+      if (!seenCmtids.has(r.cmtid)) {
+        seenCmtids.add(r.cmtid);
+        allReviews.push(r);
+        newCount++;
+      }
     });
 
-  return true; // Giữ kênh kết nối async
+    if (newCount === 0) {
+      emptyStreak++;
+      if (emptyStreak >= 2) break;
+    } else {
+      emptyStreak = 0;
+    }
+
+    const nextBtn = getNextPageButton();
+    if (!nextBtn) break;
+
+    nextBtn.click();
+
+    listWrapEl.scrollIntoView({ behavior: "smooth", block: "center" });
+    await delay(PAGE_DELAY_MS);
+  }
+
+  return { ok: true, reviews: allReviews };
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "EXTRACT_SHOPEE_REVIEWS") {
+    crawlShopeeReviews()
+      .then((result) => sendResponse(result))
+      .catch((err) =>
+        sendResponse({
+          ok: false,
+          reason: "EXCEPTION",
+          error: String(err),
+          reviews: [],
+        }),
+      );
+    return true;
+  }
 });
