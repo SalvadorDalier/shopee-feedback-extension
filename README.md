@@ -63,7 +63,7 @@ Server chạy tại `http://127.0.0.1:8000`. Swagger UI (test API trực tiếp,
 
 ### Chrome Extension
 
-![Hướng dẫn bật Developer mode và Load unpacked](E:\02_projects\web\extension-tmg\assest\load-extension-guide.png)
+![Hướng dẫn bật Developer mode và Load unpacked](.\assest\load-extension-guide.png)
 
 1. Vào `chrome://extensions/`, bật **Developer mode** ở góc trên bên phải _(mũi tên 1)_.
 2. Bấm **Load unpacked** ở góc trên bên trái _(mũi tên 2)_ → chọn thư mục `extensions/`.
